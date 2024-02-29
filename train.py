@@ -251,8 +251,8 @@ if __name__ == "__main__":
         Batch_N_obj_mask = []
         Batch_N_input_pcs = []
         Batch_N_sampled_z = []
-        Batch_N_obj_origin =[]
-        Batch_N_obj_dirs = []
+        # Batch_N_obj_origin =[]
+        # Batch_N_obj_dirs = []
 
         with performance_measure(f"Sampling over {len(obj_dict.keys())} objects,"):
             if cfg.do_bg and scene_bg is not None:
@@ -289,9 +289,11 @@ if __name__ == "__main__":
                 Batch_N_obj_mask.append(obj_mask)
                 Batch_N_input_pcs.append(input_pcs.reshape([input_pcs.shape[0] * input_pcs.shape[1], input_pcs.shape[2], input_pcs.shape[3]]))
                 Batch_N_sampled_z.append(sampled_z.reshape([sampled_z.shape[0] * sampled_z.shape[1], sampled_z.shape[2]]))
-                obj_origin = obj_origin.unsqueeze(1).expand(cfg.n_iter_per_frame * cfg.win_size, cfg.n_samples_per_frame, -1)
-                Batch_N_obj_origin.append(obj_origin.reshape([obj_origin.shape[0]*obj_origin.shape[1],obj_origin.shape[2]]))
-                Batch_N_obj_dirs.append(obj_dirs.reshape([obj_dirs.shape[0]*obj_dirs.shape[1],obj_dirs.shape[2]]))
+
+                # obj_origin = obj_origin.unsqueeze(1).expand(cfg.n_iter_per_frame * cfg.win_size, cfg.n_samples_per_frame, -1)
+                # Batch_N_obj_origin.append(obj_origin.reshape([obj_origin.shape[0]*obj_origin.shape[1],obj_origin.shape[2]]))
+                # Batch_N_obj_dirs.append(obj_dirs.reshape([obj_dirs.shape[0]*obj_dirs.shape[1],obj_dirs.shape[2]]))
+                
                 # # vis sampled points in open3D
                 # # sampled pcs
                 # pc = open3d.geometry.PointCloud()
@@ -331,8 +333,8 @@ if __name__ == "__main__":
             Batch_N_depth_mask = torch.stack(Batch_N_depth_mask).to(cfg.training_device)
             Batch_N_obj_mask = torch.stack(Batch_N_obj_mask).to(cfg.training_device)
             Batch_N_sampled_z = torch.stack(Batch_N_sampled_z).to(cfg.training_device)
-            Batch_N_obj_origin = torch.stack(Batch_N_obj_origin).to(cfg.training_device)
-            Batch_N_obj_dirs = torch.stack(Batch_N_obj_dirs).to(cfg.training_device)
+            # Batch_N_obj_origin = torch.stack(Batch_N_obj_origin).to(cfg.training_device)
+            # Batch_N_obj_dirs = torch.stack(Batch_N_obj_dirs).to(cfg.training_device)
             if cfg.do_bg:     
                           
                 bg_input_pcs = bg_input_pcs.to(cfg.training_device)
@@ -364,16 +366,16 @@ if __name__ == "__main__":
                 batch_depth_mask = Batch_N_depth_mask[:, data_idx, ...]
                 batch_obj_mask = Batch_N_obj_mask[:, data_idx, ...]
                 batch_sampled_z = Batch_N_sampled_z[:, data_idx, ...]
-                batch_obj_origin = Batch_N_obj_origin[:, data_idx, ...]
-                batch_obj_dirs = Batch_N_obj_dirs[:, data_idx, ...]  
+                # batch_obj_origin = Batch_N_obj_origin[:, data_idx, ...]
+                # batch_obj_dirs = Batch_N_obj_dirs[:, data_idx, ...]  
                 depth, color, sdf, z_vals = Renderer.render_batch_ray(cfg,scene_bg.trainer.eslam.all_planes, scene_bg.trainer.decoders,bg_dirs_W,
                                                         bg_origins, cfg.data_device, cfg.truncation,
                                                         gt_depth=bg_gt_depth)
                 
-                batch_depth,batch_rgb,batch_sdf,batch_z_vals = Renderer.render_batch_ray_obj(cfg,pe_model,pe_param,pe_buffer,fc_model, fc_param,fc_buffer,
-                                                        rays_d = batch_obj_dirs, rays_o=batch_obj_origin,
-                                                        device= cfg.data_device, truncation=cfg.truncation,
-                                                        gt_depth=batch_gt_depth)
+                # batch_depth,batch_rgb,batch_sdf,batch_z_vals = Renderer.render_batch_ray_obj(cfg,pe_model,pe_param,pe_buffer,fc_model, fc_param,fc_buffer,
+                #                                         rays_d = batch_obj_dirs, rays_o=batch_obj_origin,
+                #                                         device= cfg.data_device, truncation=cfg.truncation,
+                #                                         gt_depth=batch_gt_depth)
 
                 
                 if cfg.training_strategy == "forloop":
@@ -400,10 +402,10 @@ if __name__ == "__main__":
                 
             # step loss
             with performance_measure(f"Batch LOSS"):
-                batch_loss, _ = loss.step_batch_loss(cfg,batch_depth,batch_sdf, batch_rgb,
+                batch_loss, _ = loss.step_batch_loss(batch_alpha, batch_color,
                                      batch_gt_depth.detach(), batch_gt_rgb.detach(),
                                      batch_obj_mask.detach(), batch_depth_mask.detach(),
-                                     batch_z_vals.detach())
+                                     batch_sampled_z.detach())
 
                 if cfg.do_bg:                   
                     #eslam loss
@@ -416,18 +418,18 @@ if __name__ == "__main__":
                     mask_sdf = bg_obj_mask == 1
                     mask_sdf = mask_sdf.detach()
                     bg_valid_depth_mask = (bg_valid_depth_mask > 0).detach()
-
+                    
+                    '''
                     bg_loss, _ = loss.bg_loss(cfg, depth, color, bg_gt_depth, bg_gt_rgb, bg_obj_mask, bg_valid_depth_mask, z_vals)
                     bg_loss += loss.sdf_losses(cfg, sdf[bg_valid_depth_mask & mask_sdf], z_vals[bg_valid_depth_mask & mask_sdf], bg_gt_depth[bg_valid_depth_mask & mask_sdf])
                     '''
+                    
                     bg_loss = loss.sdf_losses(cfg, sdf[bg_valid_depth_mask & mask_sdf], z_vals[bg_valid_depth_mask & mask_sdf], bg_gt_depth[bg_valid_depth_mask & mask_sdf])
                     # Color loss
                     bg_loss = bg_loss + cfg.w_color * torch.square(bg_gt_rgb[mask_obj] - color[mask_obj]).mean()
                     # Depth loss
                     bg_loss = bg_loss + cfg.w_depth * torch.square(bg_gt_depth[bg_valid_depth_mask & mask_obj] - depth[bg_valid_depth_mask & mask_obj]).mean() 
-                    '''
-
-                optimiser.zero_grad(set_to_none=True)    
+                     
             # with performance_measure(f"Backward"):
                 if AMP:
                     scaler.scale(batch_loss).backward()
@@ -436,7 +438,8 @@ if __name__ == "__main__":
                 else:###############################
                     batch_loss.backward()
                     optimiser.step()
-                
+                optimiser.zero_grad(set_to_none=True)   
+
                 bg_optimiser.zero_grad()
                 bg_loss.backward(retain_graph=False)
                 bg_optimiser.step()
@@ -457,21 +460,21 @@ if __name__ == "__main__":
             (cfg.live_mode and time.time()-last_frame_time>cfg.keep_live_time)) and frame_id >= 10:
             vis3d.clear_geometries()
             for obj_id, obj_k in vis_dict.items():
-                if obj_id == 0 and frame_id == dataset_len-1:
+                if obj_id == 0:
                     mesh_bound = obj_k.get_bound_from_frames(cfg)
                     # adaptive_grid_dim = int(np.minimum(np.max(bound.extent)//cfg.live_voxel_size+1, cfg.grid_dim))
-                    mesh = obj_k.trainer.meshing(mesh_bound, obj_k.obj_center, grid_dim=adaptive_grid_dim)
+                    mesh = obj_k.trainer.meshing(mesh_bound, obj_k.obj_center)
                     # mesh = obj_k.trainer.bg_get_mesh(obj_k.trainer.eslam.all_planes, obj_k.trainer.decoders)
                     pass
                 elif obj_id == 0:
                     continue
                 else:
                     bound = obj_k.get_bound(intrinsic_open3d)#相机参数
-                    adaptive_grid_dim = int(np.minimum(np.max(bound.extent)//cfg.live_voxel_size+1, cfg.grid_dim))
-                    mesh = obj_k.trainer.meshing(bound, obj_k.obj_center, grid_dim=adaptive_grid_dim)
                 if bound is None:
                     print("get bound failed obj ", obj_id)
                     continue
+                adaptive_grid_dim = int(np.minimum(np.max(bound.extent)//cfg.live_voxel_size+1, cfg.grid_dim))
+                mesh = obj_k.trainer.meshing(bound, obj_k.obj_center, grid_dim=adaptive_grid_dim)
                 if mesh is None:
                     print("meshing failed obj ", obj_id)
                     continue
@@ -479,13 +482,14 @@ if __name__ == "__main__":
                 
                 obj_mesh_output = os.path.join(log_dir, "scene_mesh")
                 os.makedirs(obj_mesh_output, exist_ok=True)
+                mesh.export(os.path.join(obj_mesh_output, "frame_{}_obj{}.obj".format(frame_id, str(obj_id))))
 
-                if obj_id == 0: 
-                    mesh.export(os.path.join(obj_mesh_output, "frame_{}_obj{}.ply".format(frame_id, str(obj_id))))
-                    mesh_out_file = os.path.join(obj_mesh_output, "frame_{}_obj{}.ply".format(frame_id, str(obj_id)))
-                    #obj_k.trainer.cull_mesh(mesh_out_file, cfg, args, cfg.device, estimate_c2w_list=estimate_c2w_list)
-                else:
-                    mesh.export(os.path.join(obj_mesh_output, "frame_{}_obj{}.ply".format(frame_id, str(obj_id))))
+                # if obj_id == 0: 
+                #     mesh.export(os.path.join(obj_mesh_output, "frame_{}_obj{}.obj".format(frame_id, str(obj_id))))
+                #     mesh_out_file = os.path.join(obj_mesh_output, "frame_{}_obj{}.obj".format(frame_id, str(obj_id)))
+                #     #obj_k.trainer.cull_mesh(mesh_out_file, cfg, args, cfg.device, estimate_c2w_list=estimate_c2w_list)
+                # else:
+                #     mesh.export(os.path.join(obj_mesh_output, "frame_{}_obj{}.obj".format(frame_id, str(obj_id))))
                 if obj_id != 0:
                     # live vis
                     open3d_mesh = vis.trimesh_to_open3d(mesh)

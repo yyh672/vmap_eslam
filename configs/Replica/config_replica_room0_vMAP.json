@@ -1,7 +1,7 @@
 {
     "dataset": {
         "live": 0,
-        "path": "/dataset/demo_replica_room_0/room_0/imap/00",
+        "path": "/data/vMAP_sam/demo_replica_room_0/room_0/imap/00",
         "format": "Replica",
         "keep_alive": 20
     },

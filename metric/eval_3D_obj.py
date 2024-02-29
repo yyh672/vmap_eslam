@@ -52,6 +52,7 @@ def get_gt_bg_mesh(gt_dir, background_cls_list):
             bg_meshes.append(obj_mesh)
 
     bg_mesh = trimesh.util.concatenate(bg_meshes)
+    bg_mesh.export("./bg_gt_mesh.obj")
     return bg_mesh
 
 def get_obj_ids(obj_dir):
@@ -59,7 +60,7 @@ def get_obj_ids(obj_dir):
     obj_ids = []
     for f in files:
         obj_id = f.split("obj")[1][:-1]
-        if obj_id == '':
+        if obj_id != '0':
             continue
         obj_ids.append(int(obj_id))
     return obj_ids
@@ -68,7 +69,7 @@ def get_obj_ids(obj_dir):
 if __name__ == "__main__":
     background_cls_list = [5, 12, 30, 31, 40, 60, 92, 93, 95, 97, 98, 79]
     exp_name = ["room0"]
-    data_dir = "/dataset/demo_replica_room_0"
+    data_dir = "/data/vMAP_sam/demo_replica_room_0"
     # log_dir = "../logs/iMAP/"
     log_dir = "./logs/vMAP"
 

@@ -3,17 +3,14 @@ import trimesh
 import open3d as o3d
 import numpy as np
 
-def marching_cubes(sdf,scale,level=0.5):#0.5
+def marching_cubes(occupancy, level=0.5):
     try:
         vertices, faces, vertex_normals, _ = skimage.measure.marching_cubes(    #marching_cubes_lewiner(    #marching_cubes(
-        sdf, level=level)#gradient_direction='ascent'
-        
+            occupancy, level=level, gradient_direction='ascent')
     except (RuntimeError, ValueError):
-        return None
-    print(vertices)
-    print(faces)
-    print(vertex_normals)
-    dim = sdf.shape[0]
+       return None
+
+    dim = occupancy.shape[0]
     vertices = vertices / (dim - 1)
     mesh = trimesh.Trimesh(vertices=vertices,
                            vertex_normals=vertex_normals,

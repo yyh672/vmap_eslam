@@ -72,28 +72,21 @@ class Trainer:
             transform_np = np.eye(4, dtype=np.float32)
             transform_np[:3, 3] = bound.center
             transform_np[:3, :3] = bound.R
-            
-
             # transform_np = np.linalg.inv(transform_np)  #
             transform = torch.from_numpy(transform_np).to(self.device)
             grid_pc = render_rays.make_3D_grid(occ_range=occ_range, dim=grid_dim, device=self.device,
-                                                scale=scene_scale, transform=transform).view(-1, 3)
-            #print("grid_pc:",grid_pc)
-            #print("scene_scale:",scene_scale)
-            #print("obj_center",obj_center)
+                                            scale=scene_scale, transform=transform).view(-1, 3)
             grid_pc -= obj_center.to(grid_pc.device)
-            scale = abs(grid_pc[1]-grid_pc[0]+grid_pc[grid_dim]-grid_pc[0]+grid_pc[grid_dim*grid_dim]-grid_pc[0])
-            print("scale:",scale)
-            ret = self.eval_points(grid_pc,bound)#内存爆了
+            ret = self.eval_points(grid_pc)
             if ret is None:
                 return None
 
             occ, _ = ret
-            scale = scale.cpu().numpy()
-            mesh = vis.marching_cubes(occ.view(grid_dim, grid_dim, grid_dim).cpu().numpy(),scale)
+            mesh = vis.marching_cubes(occ.view(grid_dim, grid_dim, grid_dim).cpu().numpy())
             if mesh is None:
                 print("marching cube failed")
                 return None
+
             # Transform to [-1, 1] range
             mesh.apply_translation([-0.5, -0.5, -0.5])
             mesh.apply_scale(2)
@@ -101,65 +94,65 @@ class Trainer:
             # Transform to scene coordinates
             mesh.apply_scale(scene_scale_np)
             mesh.apply_transform(transform_np)
+
             vertices_pts = torch.from_numpy(np.array(mesh.vertices)).float().to(self.device)
-            ret = self.eval_points(vertices_pts,bound)
+            ret = self.eval_points(vertices_pts)
             if ret is None:
                 return None
             _, color = ret
             mesh_color = color * 255
             vertex_colors = mesh_color.detach().squeeze(0).cpu().numpy().astype(np.uint8)
             mesh.visual.vertex_colors = vertex_colors
+
             return mesh
 
-    def eval_points(self, points,bound,chunk_size=100000):
+    def eval_points(self, points, chunk_size=100000):
         # 256^3 = 16777216
-        if self.obj_id == 0 and self.cfg.do_bg:
-            self.points_batch_size = 500000
-            p_split = torch.split(points, self.points_batch_size)
-            bound = self.bound##################################
-            #bg_bound =  torch.zeros(3,2)
-            #bg_bound[:,0] = torch.from_numpy(bound.center - bound.extent)
-            #bg_bound[:,1] = torch.from_numpy(bound.center + bound.extent)
-            #bound =bg_bound
-            rets = []
-            for pi in p_split:
-                # mask for points out of bound
-                mask_x = (pi[:, 0] < bound[0][1]) & (pi[:, 0] > bound[0][0])
-                mask_y = (pi[:, 1] < bound[1][1]) & (pi[:, 1] > bound[1][0])
-                mask_z = (pi[:, 2] < bound[2][1]) & (pi[:, 2] > bound[2][0])
-                mask = mask_x & mask_y & mask_z
+        alpha, color = [], []
+        n_chunks = int(np.ceil(points.shape[0] / chunk_size))
+        with torch.no_grad():
+            for k in tqdm(range(n_chunks)): # 2s/it 1000000 pts
+                chunk_idx = slice(k * chunk_size, (k + 1) * chunk_size)
+                embedding_k = self.pe(points[chunk_idx, ...])
+                alpha_k, color_k = self.fc_occ_map(embedding_k)
+                alpha.extend(alpha_k.detach().squeeze())
+                color.extend(color_k.detach().squeeze())
+        alpha = torch.stack(alpha)
+        color = torch.stack(color)
 
-                ret = self.decoders(pi, self.eslam.all_planes)
+        occ = render_rays.occupancy_activation(alpha).detach()
+        if occ.max() == 0:
+            print("no occ")
+            return None
+        return (occ, color)
 
-                ret[~mask, -1] = -1
-                rets.append(ret)
+    def eval_points_bg(self, points,bound,chunk_size=100000):
+        self.points_batch_size = 500000
+        p_split = torch.split(points, self.points_batch_size)
+        bound = self.bound##################################
+        #bg_bound =  torch.zeros(3,2)
+        #bg_bound[:,0] = torch.from_numpy(bound.center - bound.extent)
+        #bg_bound[:,1] = torch.from_numpy(bound.center + bound.extent)
+        #bound =bg_bound
+        rets = []
+        for pi in p_split:
+            # mask for points out of bound
+            mask_x = (pi[:, 0] < bound[0][1]) & (pi[:, 0] > bound[0][0])
+            mask_y = (pi[:, 1] < bound[1][1]) & (pi[:, 1] > bound[1][0])
+            mask_z = (pi[:, 2] < bound[2][1]) & (pi[:, 2] > bound[2][0])
+            mask = mask_x & mask_y & mask_z
 
-            ret = torch.cat(rets, dim=0)
-            #alpha = self.sdf2alpha(ret[..., -1], self.decoders.beta)#volume densities
+            ret = self.decoders(pi, self.eslam.all_planes)
+
+            ret[~mask, -1] = -1
+            rets.append(ret)
+
+        ret = torch.cat(rets, dim=0)
+        #alpha = self.sdf2alpha(ret[..., -1], self.decoders.beta)#volume densities
             
-            #occ = 1 - torch.exp(-alpha)
-            return (ret[..., -1],ret[...,:3])#sdf,rgb
-            #return (ret[...,-1],ret[...,:3])##?S
-        else:
-            alpha, color = [], []
-            n_chunks = int(np.ceil(points.shape[0] / chunk_size))
-            with torch.no_grad():
-                for k in tqdm(range(n_chunks)): # 2s/it 1000000 pts
-                    chunk_idx = slice(k * chunk_size, (k + 1) * chunk_size)
-                    embedding_k = self.pe(points[chunk_idx, ...])#位置编码
-                    alpha_k, color_k = self.fc_occ_map(embedding_k)#MLP
-                    alpha.extend(alpha_k.detach().squeeze())
-                    color.extend(color_k.detach().squeeze())
-            alpha = torch.stack(alpha)
-            color = torch.stack(color)
-            #把点按sigmoid 投到[-1,1]
-            #occ = render_rays.occupancy_activation(alpha).detach()#这里有个detach
-            #beta = nn.Parameter(10 * torch.ones(1)).to("cuda:0")
-            #alpha = sdf2alpha(alpha,beta).detach
-            if alpha.max() == 0:
-                print("no occ")
-                return None
-            return (alpha, color)
+        #occ = 1 - torch.exp(-alpha)
+        return (ret[..., -1],ret[...,:3])#sdf,rgb
+        #return (ret[...,-1],ret[...,:3])##?S
 
     # def bg_get_mesh(self, all_planes ,decoders, device='cuda:0', color=True):
     def bg_get_mesh(self, all_planes , decoders, mesh_bound, device='cuda:0', color=True):
@@ -266,7 +259,7 @@ class Trainer:
                 mask.append(mesh_bound.contains(pnts.cpu().numpy()))
                 
                 # 操作2:计算值并将结果存储在 z 中
-                sdf,_ =self.eval_points(pnts.to(device), all_planes, decoders)
+                sdf,_ =self.eval_points_bg(pnts.to(device), all_planes, decoders)
                 z.append(sdf.cpu().numpy())
 
 
@@ -327,7 +320,7 @@ class Trainer:
                 points = torch.from_numpy(vertices)
                 z = []
                 for i, pnts in enumerate(torch.split(points, self.points_batch_size, dim=0)):
-                    _, z_color = self.eval_points(pnts.to(device).float(), all_planes, decoders)
+                    _, z_color = self.eval_points_bg(pnts.to(device).float(), all_planes, decoders)
                     z.append(z_color.cpu())
                 z = torch.cat(z, dim=0)
                 vertex_colors = z.numpy()

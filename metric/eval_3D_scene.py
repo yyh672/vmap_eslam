@@ -35,7 +35,7 @@ def calc_3d_metric(mesh_rec, mesh_gt, N=200000):
 
 if __name__ == "__main__":
     exp_name = ["room0"]
-    data_dir = "/dataset/demo_replica_room_0"
+    data_dir = "/data/vMAP_sam/demo_replica_room_0"
     # log_dir = "../logs/iMAP/"
     log_dir = "./logs/vMAP"
 
